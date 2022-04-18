@@ -9,7 +9,7 @@ class PWMHandler:
     i2c_bus = busio.I2C(SCL, SDA)
 
     def __init__(self):
-        self.max_resolution = 2 ** 15 - 1
+        self.max_resolution = 2 ** 16 - 1
         self.pca = PCA9685(PWMHandler.i2c_bus)
         self.pca.frequency = 60
 
