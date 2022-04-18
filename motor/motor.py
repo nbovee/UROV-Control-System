@@ -1,16 +1,19 @@
+from pwm_handler.pwm_handler import PWMHandler
+
+
 class Motor:
 
-    def __init__(self, io_object, pca_object, pin0, pin1, pwm0, max_val, min_val):
+    def __init__(self, io_object, pin0, pin1, pwm0, max_val, min_val):
         # init internal variables
+        self.pwm = PWMHandler()
         self.motorGPIO = io_object
-        self.motorI2C = pca_object
         self.pin0GPIO = pin0
         self.pin1GPIO = pin1
         self.pin0PWM = pwm0
         self.maxThrottle = max_val
         self.minThrottle = min_val
         self.minPulse = 0
-        self.maxPulse = 2000
+        self.maxPulse = 2000  # change to percentile
         # centerPulse = (maxPulse + minPulse) / 2 #would be used for if pwm signal alone could handle directionality
         self.rangeThrottle = self.maxThrottle  # - self.minThrottle
         self.rangeOutput = (self.maxPulse - self.minPulse)
@@ -32,7 +35,7 @@ class Motor:
         # self.lastPulse = self.pulse
         self.pulse = self.scale_throttle(abs(throttle))
         self.set_gpio_pins()
-        self.motorI2C.channels[self.pin0PWM].duty_cycle = self.pulse
+        self.pwm.set_output(self.pulse, self.pin0PWM)
 
     def scale_throttle(self, throttle):
         # scales throttle to pwm pulse range, assuming a monodirectional throttle, directionality is handled by output()
@@ -55,8 +58,8 @@ class Motor:
 
 class Motor_IBT2(Motor):
 
-    def __init__(self, io_object, pca_object, pin0, pin1, pwm0, pwm1, max_val, min_val):
-        super().__init__(io_object, pca_object, pin0, pin1, pwm0, max_val, min_val)
+    def __init__(self, io_object, pin0, pin1, pwm0, pwm1, max_val, min_val):
+        super().__init__(io_object, pin0, pin1, pwm0, max_val, min_val)
         self.pin1PWM = pwm1
 
     def output(self, throttle):
@@ -67,9 +70,9 @@ class Motor_IBT2(Motor):
         self.pulse = self.scale_throttle(abs(throttle))
         self.set_gpio_pins()
         if self.invert ^ self.sign:
-            self.motorI2C.channels[self.pin0PWM].duty_cycle = self.pulse
-            self.motorI2C.channels[self.pin1PWM].duty_cycle = 0
+            self.pwm.set_output(self.pulse, self.pin0PWM)
+            self.pwm.set_output(0, self.pin1PWM)
 
         else:
-            self.motorI2C.channels[self.pin0PWM].duty_cycle = 0
-            self.motorI2C.channels[self.pin1PWM].duty_cycle = self.pulse
+            self.pwm.set_output(0, self.pin0PWM)
+            self.pwm.set_output(self.pulse, self.pin1PWM)
