@@ -1,14 +1,14 @@
 from pwm_handler.pwm_handler import PWMHandler
+from gpio.gpio import single_gpio
 
 
 class Motor:
 
-    def __init__(self, io_object, pin0, pin1, pwm0, max_val, min_val):
+    def __init__(self, pin0, pin1, pwm0, max_val, min_val):
         # init internal variables
         self.pwm = PWMHandler()
-        self.motorGPIO = io_object
-        self.pin0GPIO = pin0
-        self.pin1GPIO = pin1
+        self.motorGPIO = single_gpio()
+        self.gpio_pins = [pin0, pin1]
         self.pin0PWM = pwm0
         self.maxThrottle = max_val
         self.minThrottle = min_val
@@ -25,8 +25,8 @@ class Motor:
         self.invert = False
 
         # initialize pins to control motor direction
-        self.motorGPIO.setup(self.pin0GPIO, self.motorGPIO.OUT)
-        self.motorGPIO.setup(self.pin1GPIO, self.motorGPIO.OUT)
+        self.motorGPIO.setup(self.gpio_pins[0], self.motorGPIO.OUT)
+        self.motorGPIO.setup(self.gpio_pins[1], self.motorGPIO.OUT)
 
     def output(self, throttle):
         # handles motor control, assuming bidirectional throttle and L298N style motor controller
@@ -43,11 +43,11 @@ class Motor:
 
     def set_gpio_pins(self):
         if not (self.invert ^ self.sign):
-            self.motorGPIO.output(self.pin0GPIO, self.motorGPIO.HIGH)
-            self.motorGPIO.output(self.pin1GPIO, self.motorGPIO.LOW)
+            self.motorGPIO.output(self.gpio_pins[0], self.motorGPIO.HIGH)
+            self.motorGPIO.output(self.gpio_pins[1], self.motorGPIO.LOW)
         else:
-            self.motorGPIO.output(self.pin0GPIO, self.motorGPIO.LOW)
-            self.motorGPIO.output(self.pin1GPIO, self.motorGPIO.HIGH)
+            self.motorGPIO.output(self.gpio_pins[0], self.motorGPIO.LOW)
+            self.motorGPIO.output(self.gpio_pins[1], self.motorGPIO.HIGH)
 
     def flip_stick(self):
         self.invert = False if self.invert else True
@@ -55,11 +55,16 @@ class Motor:
     def reset_flip(self):
         self.invert = False
 
+    def __del__(self):
+        for pin in self.gpio_pins:
+            self.motorGPIO.cleanup(pin.id)
+            # self.motorGPIO.setup(pin, self.motorGPIO.IN)
+
 
 class Motor_IBT2(Motor):
 
-    def __init__(self, io_object, pin0, pin1, pwm0, pwm1, max_val, min_val):
-        super().__init__(io_object, pin0, pin1, pwm0, max_val, min_val)
+    def __init__(self, pin0, pin1, pwm0, pwm1, max_val, min_val):
+        super().__init__(pin0, pin1, pwm0, max_val, min_val)
         self.pin1PWM = pwm1
 
     def output(self, throttle):
