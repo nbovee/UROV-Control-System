@@ -1,5 +1,12 @@
 import evdev
 
+
+l_min = r_min = 0
+l_max = r_max = 2 ** 15 - 1
+
+v_min = -1 * 2 ** 8
+v_max = 2 ** 8, -1
+
 validCodes = {
     # 0 : 'L_X',
     1: 'L_Y',
@@ -35,6 +42,7 @@ try:
             print(device.name + " connected.")
             break
     if device is None:
+        #attempt a renegotiate
         print("Controller not found, check for power and correct Xinput/Dinput setting.")
         sys.exit()
 

@@ -13,7 +13,6 @@ device = None
 # comment out controls that will not be used.
 
 
-
 def main():
     print("starting UROV_Wireless")
 

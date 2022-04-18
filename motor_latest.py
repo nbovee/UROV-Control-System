@@ -42,11 +42,11 @@ class Motor:
 
     def set_gpio_pins(self):
         if not (self.invert ^ self.sign):
-            self.motorGPIO.output(self.pin0GPIO, self.motorGPIO.HIGH)
-            self.motorGPIO.output(self.pin1GPIO, self.motorGPIO.LOW)
+            self.motorGPIO.output(self.pin0GPIO)
+            self.motorGPIO.output(self.pin1GPIO)
         else:
-            self.motorGPIO.output(self.pin0GPIO, self.motorGPIO.LOW)
-            self.motorGPIO.output(self.pin1GPIO, self.motorGPIO.HIGH)
+            self.motorGPIO.output(self.pin0GPIO)
+            self.motorGPIO.output(self.pin1GPIO)
 
     def flip_stick(self):
         self.invert = False if self.invert else True
