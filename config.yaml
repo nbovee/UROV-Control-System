@@ -1,0 +1,27 @@
+# potential tool: pip install pickle-rick
+right_motor:
+  type: IBT2
+  forward_activate_pin: 18
+  reverse_activate_pin: 17
+  forward_pwm_pin: 2
+  reverse_pwm_pin: None
+  maximum_pwm_value: 2 ** 15
+  minimum_pwm_value: 0
+
+vertical_motor:
+  type: IBT2
+  forward_activate_pin: 5
+  reverse_activate_pin: 6
+  forward_pwm_pin: 1
+  reverse_pwm_pin: 3
+  maximum_pwm_value: 2 ** 8 -1
+  minimum_pwm_value: -2 ** 8
+
+left_motor:
+  type: IBT2
+  forward_activate_pin: 23
+  reverse_activate_pin: 24
+  forward_pwm_pin: 0
+  reverse_pwm_pin: None
+  maximum_pwm_value: 2 ** 15
+  minimum_pwm_value: 0 

@@ -1,13 +1,8 @@
 #!/usr/bin/python3
 
-
 # import servo (PWM) controller and dependencies
-# from board import SCL, SDA
 import sys
-
-# import evdev for gamepad
-# from evdev import InputDevice, categorize, ecodes
-import evdev
+import evdev # Linux only
 from motor import Motor, Motor_IBT2
 import RPi.GPIO as GPIO
 from adafruit_pca9685 import PCA9685
@@ -42,7 +37,7 @@ validCodes = {
 
 
 def main():
-    print("starting UROV_Wireless")
+    print(f"starting {__name__}")
     global device
     try:
         # initialize Controller
