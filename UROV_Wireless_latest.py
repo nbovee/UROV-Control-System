@@ -8,7 +8,7 @@ import sys
 # import evdev for gamepad
 # from evdev import InputDevice, categorize, ecodes
 import evdev
-from motor import Motor, Motor_IBT2
+from motor import Motor_IBT2
 import RPi.GPIO as GPIO
 from adafruit_pca9685 import PCA9685
 import busio
@@ -66,12 +66,9 @@ def main():
         pca = PCA9685(i2c_bus)
         pca.frequency = 60
         # create the motors
-        # io_object, pca, pin0, pin1, pwm0, max_val, min_val
-        l_motor = Motor(GPIO, pca, 18, 17, 2, 2 ** 15, 0)
-        r_motor = Motor(GPIO, pca, 23, 24, 0, 2 ** 15, 0)
-        # v_motor is controlled by a different board type
-        # io_object, pca, pin0, pin1, pwm0, pwm1, max_val, min_val
-        v_motor = Motor_IBT2(GPIO, pca, 5, 6, 1, 3, 2 ** 8, -1 * 2 ** 8) #originally used GPIO27 & 22, moved due to suspected burnout
+        r_motor = Motor_IBT2(GPIO, pca, 0, 1, 2 ** 15, 0)
+        v_motor = Motor_IBT2(GPIO, pca, 4, 5, 2 ** 8, -1 * 2 ** 8) # Analog triggers define resolution
+        l_motor = Motor_IBT2(GPIO, pca, 8, 9,  2 ** 15, 0)
 
         l_trig_last = 0
         r_trig_last = 0
