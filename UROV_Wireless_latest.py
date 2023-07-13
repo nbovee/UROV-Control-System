@@ -45,14 +45,14 @@ def main():
     for d in devices:
         if d.name == "Logitech Gamepad F710":
             # scan all devices and grab() the controller to avoid conflict
-            device = d.path
-            print(d.name + " identified.")
+            device = d
+            print(device.name + " identified.")
             break
     if device is None:
         print("Controller not found, check for power and correct Xinput/Dinput setting.")
         sys.exit()
 
-    with evdev.InputDevice(device) as device:
+    with evdev.InputDevice(device.path) as device:
     
         i2c_bus = busio.I2C(SCL, SDA)
 
