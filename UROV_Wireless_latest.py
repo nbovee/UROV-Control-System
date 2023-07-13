@@ -2,23 +2,18 @@
 
 
 # import servo (PWM) controller and dependencies
-# from board import SCL, SDA
 import sys
-
-# import evdev for gamepad
-# from evdev import InputDevice, categorize, ecodes
 import evdev
 from motor import Motor_IBT2
 import RPi.GPIO as GPIO
 from adafruit_pca9685 import PCA9685
 import busio
 from board import SCL, SDA
-
-
-device = None
+import atexit
 
 # event codes for the Logitech controller to be used
 # comment out controls that will not be used.
+device = None
 validCodes = {
     # 0 : 'L_X',
     1: 'L_Y',
@@ -42,23 +37,23 @@ validCodes = {
 
 
 def main():
+    atexit.register(exit_func)
     print("starting UROV_Wireless")
-    global device
-    try:
         # initialize Controller
-        devices = [evdev.InputDevice(path) for path in evdev.list_devices()]
+    devices = [evdev.InputDevice(path) for path in evdev.list_devices()]
 
-        for d in devices:
-            if d.name == "Logitech Gamepad F710":
-                # scan all devices and grab() the controller to avoid conflict
-                device = evdev.InputDevice(d.path)
-                device.grab()
-                # output controller object for debug
-                print(device.name + " connected.")
-                break
-        if device is None:
-            print("Controller not found, check for power and correct Xinput/Dinput setting.")
-            sys.exit()
+    for d in devices:
+        if d.name == "Logitech Gamepad F710":
+            # scan all devices and grab() the controller to avoid conflict
+            device = d.path
+            print(d.name + " identified.")
+            break
+    if device is None:
+        print("Controller not found, check for power and correct Xinput/Dinput setting.")
+        sys.exit()
+
+    with evdev.InputDevice(device) as device:
+    
         i2c_bus = busio.I2C(SCL, SDA)
 
         # import GPIO and initialize
@@ -121,16 +116,8 @@ def main():
                             l_motor.reset_flip()
                             r_motor.reset_flip()
                             v_motor.reset_flip()
-    except KeyboardInterrupt:
-        print("Program stopped by KeyboardInterrupt.")
-    except ImportError:
-        print("Import Error")
-    except Exception as exception:
-        #Output unexpected Exceptions.
-        print(exception, False)
-        print(exception.__class__.__name__ + ": " + exception.message)
-        print("Progam Stopped unexpectedly. Please diagnose.")
-    finally:
+
+def exit_func():
         GPIO.cleanup()
         print("GPIO pins cleared.")
         if device is not None:
