@@ -1,0 +1,10 @@
+ [Unit]
+ Description=UROV Control Service
+ After=multi-user.target
+
+ [Service]
+ Type=idle
+ ExecStart=/usr/bin/python /home/pi/UROV_Wireless.py
+
+ [Install]
+ WantedBy=multi-user.target
