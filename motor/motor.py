@@ -1,5 +1,4 @@
 class Motor:
-
     def __init__(self, io_object, pca_object, pin0, pin1, pwm0, max_val, min_val):
         # init internal variables
         self.motorGPIO = io_object
@@ -13,7 +12,7 @@ class Motor:
         self.maxPulse = 2000
         # centerPulse = (maxPulse + minPulse) / 2 #would be used for if pwm signal alone could handle directionality
         self.rangeThrottle = self.maxThrottle  # - self.minThrottle
-        self.rangeOutput = (self.maxPulse - self.minPulse)
+        self.rangeOutput = self.maxPulse - self.minPulse
 
         # holders for control logic
         self.sign = False
@@ -54,7 +53,6 @@ class Motor:
 
 
 class Motor_IBT2(Motor):
-
     def __init__(self, io_object, pca_object, pin0, pin1, pwm0, pwm1, max_val, min_val):
         super().__init__(io_object, pca_object, pin0, pin1, pwm0, max_val, min_val)
         self.pin1PWM = pwm1
