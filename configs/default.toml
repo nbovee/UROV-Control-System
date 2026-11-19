@@ -8,15 +8,17 @@ reconnect_interval_s = 0.5
 2 = "L_trig"
 4 = "R_Y"
 5 = "R_trig"
-# 0 = "L_X"  # optional fourth-motor control
+16 = "Dpad_X"   # Trim left/right balance
+17 = "Dpad_Y"   # Trim vertical balance
+# 0 = "L_X"  # optional fifth-motor control
 
 [controller.buttons]
 304 = "A"       # Arm (requires neutral controls)
 305 = "B"       # Disarm / E-Stop
-308 = "Y"       # Flip vertical
+308 = "Y"       # Flip verticals
 310 = "L_bmp"   # Flip left
 311 = "R_bmp"   # Flip right
-314 = "Back"    # Reset flips
+314 = "Back"    # Reset flips and trim
 
 [controller.actions]
 arm = "A"
@@ -25,6 +27,20 @@ reset_flips = "Back"
 
 [controller.trigger_mux]
 vertical = ["L_trig", "R_trig"]
+
+[controller.balance.horizontal]
+axis = "Dpad_X"
+primary = "left"
+secondary = "right"
+step = 0.05
+max_trim = 0.30
+
+[controller.balance.vertical]
+axis = "Dpad_Y"
+primary = "vertical_primary"
+secondary = "vertical_secondary"
+step = 0.05
+max_trim = 0.30
 
 [vehicle]
 i2c_bus = 1
@@ -61,7 +77,7 @@ deadzone = true
 invert = false
 
 [[motor]]
-name = "vertical"
+name = "vertical_primary"
 rpwm = 1
 lpwm = 3
 max_duty = 0.5
@@ -70,12 +86,23 @@ flip = "Y"
 deadzone = false
 invert = false
 
-# Fourth motor example: enable the L_X axis above, wire PCA9685 channels 6 and 7
+[[motor]]
+name = "vertical_secondary"
+rpwm = 6
+lpwm = 7
+max_duty = 0.5
+control = "vertical"
+flip = "Y"
+deadzone = false
+# Set true if the secondary thruster is counter-rotating / mirrored.
+invert = false
+
+# Fifth motor example: enable the L_X axis above, wire PCA9685 channels 8 and 9
 # to another IBT-2, and uncomment this block.
 # [[motor]]
-# name = "fourth"
-# rpwm = 6
-# lpwm = 7
+# name = "fifth"
+# rpwm = 8
+# lpwm = 9
 # max_duty = 0.5
 # control = "L_X"
 # deadzone = true

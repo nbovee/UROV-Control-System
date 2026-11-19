@@ -66,21 +66,22 @@ def test_initialization_writes_registers_and_prescale() -> None:
     assert bus.registers[MODE1] == MODE1_AI | MODE1_RESTART
 
 
-def test_set_duty_full_off_full_on_and_half() -> None:
+@pytest.mark.parametrize(
+    ("duty", "payload"),
+    [
+        pytest.param(0.0, [0, 0, 0, 0x10], id="off"),
+        pytest.param(0.5, [0, 0, 0, 0x08], id="half"),
+        pytest.param(1.0, [0, 0x10, 0, 0], id="full-on"),
+        pytest.param(-0.5, [0, 0, 0, 0x10], id="clamp-low"),
+        pytest.param(1.5, [0, 0x10, 0, 0], id="clamp-high"),
+    ],
+)
+def test_set_duty_encodes_and_clamps(duty: float, payload: list[int]) -> None:
     pca, bus = make_pca()
 
-    pca.set_duty(3, 0.0)
-    assert bus.block_writes[-1] == (ADDRESS, LED0_ON_L + 12, [0, 0, 0, 0x10])
+    pca.set_duty(3, duty)
 
-    pca.set_duty(3, 1.0)
-    assert bus.block_writes[-1] == (ADDRESS, LED0_ON_L + 12, [0, 0x10, 0, 0])
-
-    pca.set_duty(3, 0.5)
-    address, register, data = bus.block_writes[-1]
-    counts = data[2] | ((data[3] & 0x0F) << 8)
-    assert address == ADDRESS
-    assert register == LED0_ON_L + 12
-    assert counts == 2048
+    assert bus.block_writes[-1] == (ADDRESS, LED0_ON_L + 12, payload)
 
 
 def test_all_off_writes_global_off_register() -> None:
@@ -103,37 +104,132 @@ def test_close_is_idempotent_and_closes_owned_bus_on_error() -> None:
     assert bus.close_calls == 1
 
 
-def test_invalid_channel_and_frequency_raise() -> None:
+@pytest.mark.parametrize(
+    "channel",
+    [pytest.param(16, id="too-high"), pytest.param(-1, id="negative")],
+)
+def test_invalid_channel_raises(channel: int) -> None:
     pca, _ = make_pca()
 
     with pytest.raises(ValueError, match="channel"):
-        pca.set_duty(16, 0.5)
-    with pytest.raises(ValueError, match="channel"):
-        pca.set_duty(-1, 0.5)
+        pca.set_duty(channel, 0.5)
+
+
+@pytest.mark.parametrize(
+    "frequency",
+    [pytest.param(23, id="too-low"), pytest.param(1527, id="too-high")],
+)
+def test_invalid_frequency_raises(frequency: int) -> None:
     with pytest.raises(ValueError, match="frequency"):
-        PCA9685(address=ADDRESS, frequency=23, bus=FakeSMBus())
-    with pytest.raises(ValueError, match="frequency"):
-        PCA9685(address=ADDRESS, frequency=1527, bus=FakeSMBus())
+        PCA9685(address=ADDRESS, frequency=frequency, bus=FakeSMBus())
 
 
-def test_positive_throttle_zeroes_lpwm_before_driving_rpwm() -> None:
-    motor, pca = make_motor()
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        pytest.param({"rpwm": -1, "lpwm": 4}, "rpwm", id="rpwm-negative"),
+        pytest.param({"rpwm": 16, "lpwm": 4}, "rpwm", id="rpwm-too-high"),
+        pytest.param({"rpwm": 2, "lpwm": -1}, "lpwm", id="lpwm-negative"),
+        pytest.param({"rpwm": 2, "lpwm": 16}, "lpwm", id="lpwm-too-high"),
+        pytest.param({"rpwm": 2, "lpwm": 2}, "different channels", id="same-channel"),
+        pytest.param(
+            {"rpwm": 2, "lpwm": 4, "max_duty": 0.0},
+            "max_duty",
+            id="max-duty-zero",
+        ),
+        pytest.param(
+            {"rpwm": 2, "lpwm": 4, "max_duty": -0.1},
+            "max_duty",
+            id="max-duty-negative",
+        ),
+        pytest.param(
+            {"rpwm": 2, "lpwm": 4, "max_duty": 1.5},
+            "max_duty",
+            id="max-duty-too-high",
+        ),
+    ],
+)
+def test_invalid_ibt2_init_raises(kwargs: dict[str, object], match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        IBT2Motor(FakePCA9685(), **kwargs)
 
-    motor.output(1.0)
 
-    assert pca.calls == [("set_duty", 4, 0.0), ("set_duty", 2, 0.5)]
-    assert pca.duties[4] == 0.0
-    assert pca.duties[2] == 0.5
+@pytest.mark.parametrize(
+    ("throttle", "invert", "max_duty", "expected_calls"),
+    [
+        pytest.param(
+            1.0,
+            False,
+            0.5,
+            [("set_duty", 4, 0.0), ("set_duty", 2, 0.5)],
+            id="forward-zeroes-lpwm-first",
+        ),
+        pytest.param(
+            -1.0,
+            False,
+            0.5,
+            [("set_duty", 2, 0.0), ("set_duty", 4, 0.5)],
+            id="reverse-zeroes-rpwm-first",
+        ),
+        pytest.param(
+            0.0,
+            False,
+            0.5,
+            [("set_duty", 2, 0.0), ("set_duty", 4, 0.0)],
+            id="zero-stops-both",
+        ),
+        pytest.param(
+            5.0,
+            False,
+            0.5,
+            [("set_duty", 4, 0.0), ("set_duty", 2, 0.5)],
+            id="clamp-forward",
+        ),
+        pytest.param(
+            -5.0,
+            False,
+            0.5,
+            [("set_duty", 2, 0.0), ("set_duty", 4, 0.5)],
+            id="clamp-reverse",
+        ),
+        pytest.param(
+            1.0,
+            True,
+            0.5,
+            [("set_duty", 2, 0.0), ("set_duty", 4, 0.5)],
+            id="invert-forward",
+        ),
+        pytest.param(
+            -1.0,
+            True,
+            0.5,
+            [("set_duty", 4, 0.0), ("set_duty", 2, 0.5)],
+            id="invert-reverse",
+        ),
+        pytest.param(
+            0.5,
+            False,
+            0.4,
+            [("set_duty", 4, 0.0), ("set_duty", 2, 0.2)],
+            id="max-duty-forward",
+        ),
+        pytest.param(
+            -0.5,
+            False,
+            0.4,
+            [("set_duty", 2, 0.0), ("set_duty", 4, 0.2)],
+            id="max-duty-reverse",
+        ),
+    ],
+)
+def test_output_drives_one_channel_and_zeroes_the_other(
+    throttle: float, invert: bool, max_duty: float, expected_calls: list[tuple]
+) -> None:
+    motor, pca = make_motor(invert=invert, max_duty=max_duty)
 
+    motor.output(throttle)
 
-def test_negative_throttle_zeroes_rpwm_before_driving_lpwm() -> None:
-    motor, pca = make_motor()
-
-    motor.output(-1.0)
-
-    assert pca.calls == [("set_duty", 2, 0.0), ("set_duty", 4, 0.5)]
-    assert pca.duties[2] == 0.0
-    assert pca.duties[4] == 0.5
+    assert pca.calls == expected_calls
 
 
 def test_direction_reversal_never_drives_both_channels() -> None:
@@ -150,32 +246,13 @@ def test_direction_reversal_never_drives_both_channels() -> None:
     assert pca.duties[4] == 0.0
 
 
-def test_throttle_is_clamped_and_invert_flips_direction() -> None:
-    motor, pca = make_motor()
-
-    motor.output(5.0)
-    assert pca.duties[2] == 0.5
-    assert pca.duties[4] == 0.0
-
-    motor.output(-5.0)
-    assert pca.duties[2] == 0.0
-    assert pca.duties[4] == 0.5
-
-    inverted, inverted_pca = make_motor(invert=True)
-    inverted.output(1.0)
-    assert inverted_pca.duties[2] == 0.0
-    assert inverted_pca.duties[4] == 0.5
-
-
 def test_zero_and_stop_zero_both_channels() -> None:
     motor, pca = make_motor()
 
     motor.output(-1.0)
     motor.output(0.0)
-    assert pca.duties[2] == 0.0
-    assert pca.duties[4] == 0.0
+    assert (pca.duties[2], pca.duties[4]) == (0.0, 0.0)
 
     motor.output(1.0)
     motor.stop()
-    assert pca.duties[2] == 0.0
-    assert pca.duties[4] == 0.0
+    assert (pca.duties[2], pca.duties[4]) == (0.0, 0.0)
