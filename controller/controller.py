@@ -57,9 +57,16 @@ class InputMapper:
         for positive, negative in controller.trigger_mux.values():
             self._trigger_labels.update((positive, negative))
 
+        self._balance_by_axis = {b.axis: b for b in controller.balance}
+        self._balance_axes = set(self._balance_by_axis)
+        self._trims: dict[str, float] = {b.name: 0.0 for b in controller.balance}
+        self._hat_state: dict[str, int] = {axis: 0 for axis in self._balance_axes}
+
         self._axes: dict[str, float] = {label: 0.0 for label in controller.axes.values()}
         self._controls: dict[str, float] = {
-            label: 0.0 for label in controller.axes.values() if label not in self._trigger_labels
+            label: 0.0
+            for label in controller.axes.values()
+            if label not in self._trigger_labels and label not in self._balance_axes
         }
         self._controls.update({mux: 0.0 for mux in controller.trigger_mux})
 
@@ -74,6 +81,11 @@ class InputMapper:
     def controls(self) -> dict[str, float]:
         """Return a copy of the current normalized controls."""
         return dict(self._controls)
+
+    @property
+    def trims(self) -> dict[str, float]:
+        """Return a copy of the current balance trims."""
+        return dict(self._trims)
 
     def is_neutral(self) -> bool:
         """Return True when every motor control is within the neutral margin."""
@@ -94,6 +106,24 @@ class InputMapper:
 
         if event_type == EV_ABS and code in controller.axes:
             label = controller.axes[code]
+            if label in self._balance_axes:
+                direction = -1 if value < 0 else (1 if value > 0 else 0)
+                prev = self._hat_state[label]
+                self._hat_state[label] = direction
+                if direction != 0 and direction != prev:
+                    bal = self._balance_by_axis[label]
+                    updated = round(
+                        max(
+                            -bal.max_trim,
+                            min(bal.max_trim, self._trims[bal.name] + direction * bal.step),
+                        ),
+                        6,
+                    )
+                    if updated != self._trims[bal.name]:
+                        self._trims[bal.name] = updated
+                        logger.info("Balance trim %s: %+.2f", bal.name, updated)
+                return True
+
             if absinfo is not None:
                 minimum, maximum = absinfo.min, absinfo.max
             elif label in self._trigger_labels:
@@ -127,7 +157,9 @@ class InputMapper:
                 elif label == controller.reset_flips:
                     for name in self._flips:
                         self._flips[name] = False
-                    logger.info("Motor flips reset.")
+                    for name in self._trims:
+                        self._trims[name] = 0.0
+                    logger.info("Motor flips and trims reset.")
                 elif label in self._by_flip:
                     for name in self._by_flip[label]:
                         self._flips[name] = not self._flips[name]
@@ -141,8 +173,13 @@ class InputMapper:
             self._axes[label] = 0.0
         for control in self._controls:
             self._controls[control] = 0.0
-        if disarm and self.config.controller.arm is not None:
-            self.armed = False
+        for axis in self._hat_state:
+            self._hat_state[axis] = 0
+        if disarm:
+            for name in self._trims:
+                self._trims[name] = 0.0
+            if self.config.controller.arm is not None:
+                self.armed = False
 
     def motor_setpoints(self) -> dict[str, float]:
         """Return normalized setpoints for every motor, zeroed while disarmed."""
@@ -150,12 +187,18 @@ class InputMapper:
             return {motor.name: 0.0 for motor in self.config.motors}
 
         setpoints: dict[str, float] = {}
+        scales: dict[str, float] = {}
+        for bal in self.config.controller.balance:
+            trim = self._trims[bal.name]
+            scales[bal.primary] = 1.0 + trim if trim < 0.0 else 1.0
+            scales[bal.secondary] = 1.0 - trim if trim > 0.0 else 1.0
         for motor in self.config.motors:
             value = self._controls.get(motor.control, 0.0)
             if motor.deadzone:
                 value = apply_deadzone(value, self.config.controller.deadzone)
             if self._flips[motor.name]:
                 value = -value
+            value *= scales.get(motor.name, 1.0)
             setpoints[motor.name] = max(-1.0, min(1.0, value))
         return setpoints
 

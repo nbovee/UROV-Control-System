@@ -26,8 +26,10 @@ F310/F710 in **XInput mode** (F710: rear switch to `X`).
 | Left / Right triggers | Vertical thruster (muxed to `[-1, 1]`) |
 | **A** | Arm (requires neutral controls) |
 | **B** | Disarm / E-Stop |
-| **LB** / **RB** / **Y** | Flip left / right / vertical |
-| **Back** | Reset flips |
+| **LB** / **RB** / **Y** | Flip left / right / verticals |
+| **D-pad Left / Right** | Trim left/right balance |
+| **D-pad Up / Down** | Trim vertical balance |
+| **Back** | Reset flips & trim (trim does not persist through a reset) |
 
 ## Hardware & Safety
 
@@ -37,7 +39,10 @@ Default PCA9685 (`/dev/i2c-1`, `0x40`, 1000 Hz) channel map — verify against t
 | --- | --- | ---: | ---: |
 | Left | `left` | 2 | 4 |
 | Right | `right` | 0 | 5 |
-| Vertical | `vertical` | 1 | 3 |
+| Vertical (primary) | `vertical_primary` | 1 | 3 |
+| Vertical (secondary) | `vertical_secondary` | 6 | 7 |
+
+Both vertical thrusters share `control = "vertical"` and `flip = "Y"`, so they drive in sync (set `invert = true` on one if counter-rotating).
 
 - **Carrier PCB:** `R_EN`/`L_EN` are tied HIGH, so bridges stay enabled whenever logic power is present. Software zeroes all channels atomically (`ALL_LED_OFF_H`) on boot, disarm, disconnect, and exit; reversing also zeroes the inactive PWM input to avoid shoot-through.
 - A crash or I2C fault therefore cannot disable the drivers — add a hardware fail-safe (pull `/OE` high, or an inline e-stop in the logic/motor supply).
@@ -47,7 +52,7 @@ Default PCA9685 (`/dev/i2c-1`, `0x40`, 1000 Hz) channel map — verify against t
 
 Edit `configs/default.toml` (or pass another profile):
 
-- `[controller]` — device names, deadzone, reconnect cadence, axis/button/action bindings.
+- `[controller]` — device names, deadzone, reconnect cadence, axis/button/action bindings; `[controller.balance.*]` maps a D-pad axis to its two thrusters (`axis`, `primary`, `secondary`, `step`, `max_trim`).
 - `[vehicle]` — `i2c_bus`, `pca9685_address`, `pwm_frequency`, `control_rate_hz`. Keep `watchdog_timeout_s = 0.0` for the local evdev loop; set `0.5` for a future PoE heartbeat link so a lost link zeros outputs.
 - `[[motor]]` — one block per thruster (`rpwm`/`lpwm`, `max_duty`, `control`, `flip`, `invert`); a commented fourth-motor example is included.
 

@@ -10,6 +10,16 @@ DEFAULT_CONFIG = Path(__file__).resolve().parent / "configs" / "default.toml"
 
 
 @dataclass(frozen=True)
+class BalanceConfig:
+    name: str
+    axis: str
+    primary: str
+    secondary: str
+    step: float = 0.05
+    max_trim: float = 0.30
+
+
+@dataclass(frozen=True)
 class ControllerConfig:
     device_names: tuple[str, ...]
     axes: dict[int, str]
@@ -20,6 +30,7 @@ class ControllerConfig:
     reset_flips: str | None = "Back"
     deadzone: float = 0.02
     reconnect_interval_s: float = 0.5
+    balance: tuple[BalanceConfig, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -92,6 +103,38 @@ def _trigger_mux(section: object) -> dict[str, tuple[str, str]]:
             raise ValueError(f"controller.trigger_mux.{key} labels must be non-empty strings")
         mux[key] = (pos, neg)
     return mux
+
+
+def _balance(section: object) -> tuple[BalanceConfig, ...]:
+    if section is None:
+        return ()
+    if not isinstance(section, dict):
+        raise ValueError("controller.balance must be a table of named groups")
+    groups: list[BalanceConfig] = []
+    for raw_name, raw_group in section.items():
+        name = str(raw_name)
+        if not name:
+            raise ValueError("controller.balance group names must be non-empty")
+        if not isinstance(raw_group, dict):
+            raise ValueError(f"controller.balance.{name} must be a table")
+        missing = [key for key in ("axis", "primary", "secondary") if key not in raw_group]
+        if missing:
+            raise ValueError(
+                f"controller.balance.{name} is missing required field(s): {', '.join(missing)}"
+            )
+        groups.append(
+            BalanceConfig(
+                name=name,
+                axis=str(raw_group["axis"]),
+                primary=str(raw_group["primary"]),
+                secondary=str(raw_group["secondary"]),
+                step=_as_float(raw_group.get("step", 0.05), f"controller.balance.{name}.step"),
+                max_trim=_as_float(
+                    raw_group.get("max_trim", 0.30), f"controller.balance.{name}.max_trim"
+                ),
+            )
+        )
+    return tuple(groups)
 
 
 def _optional_label(section: dict, field: str, default: str) -> str | None:
@@ -169,8 +212,53 @@ def _validate(config: Config) -> None:
                 f"motor {motor.name}: trigger {motor.control!r} is consumed by trigger_mux"
             )
 
-    available_controls = (set(axis_labels) - consumed_triggers) | set(controller.trigger_mux)
+    balance_names: set[str] = set()
+    balance_axes: set[str] = set()
+    balance_motors: set[str] = set()
+    for balance in controller.balance:
+        if not balance.name:
+            raise ValueError("balance group names must be non-empty")
+        if balance.name in balance_names:
+            raise ValueError(f"balance group {balance.name!r}: name must be unique")
+        balance_names.add(balance.name)
+        if balance.axis not in axis_labels:
+            raise ValueError(
+                f"balance group {balance.name}: axis {balance.axis!r} is not an axis label"
+            )
+        if balance.axis in consumed_triggers:
+            raise ValueError(
+                f"balance group {balance.name}: axis {balance.axis!r} is consumed by trigger_mux"
+            )
+        if balance.axis in balance_axes:
+            raise ValueError(f"balance axis {balance.axis!r} is used by multiple balance groups")
+        balance_axes.add(balance.axis)
+        for role, motor_name in (
+            ("primary", balance.primary),
+            ("secondary", balance.secondary),
+        ):
+            if motor_name not in names:
+                raise ValueError(
+                    f"balance group {balance.name}: unknown {role} motor {motor_name!r}"
+                )
+        if balance.primary == balance.secondary:
+            raise ValueError(
+                f"balance group {balance.name}: primary and secondary motors must differ"
+            )
+        for motor_name in (balance.primary, balance.secondary):
+            if motor_name in balance_motors:
+                raise ValueError(f"motor {motor_name!r} belongs to multiple balance groups")
+            balance_motors.add(motor_name)
+        if not 0.0 < balance.step <= balance.max_trim < 1.0:
+            raise ValueError(f"balance group {balance.name}: require 0.0 < step <= max_trim < 1.0")
+
+    available_controls = (set(axis_labels) - consumed_triggers - balance_axes) | set(
+        controller.trigger_mux
+    )
     for motor in motors:
+        if motor.control in balance_axes:
+            raise ValueError(
+                f"motor {motor.name}: control {motor.control!r} is reserved for a balance group"
+            )
         if motor.control not in available_controls:
             raise ValueError(f"motor {motor.name}: unknown control {motor.control!r}")
         if motor.flip is not None and motor.flip not in button_labels:
@@ -248,6 +336,7 @@ def load_config(path: str | Path | None = None) -> Config:
             raw_controller.get("reconnect_interval_s", 0.5),
             "controller.reconnect_interval_s",
         ),
+        balance=_balance(raw_controller.get("balance")),
     )
     config = Config(
         controller=controller,

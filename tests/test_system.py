@@ -2,20 +2,131 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from config import MotorConfig, load_config
+import pytest
+
+from config import Config, MotorConfig, load_config
 from motor.system import MotorSystem
 from tests.fakes import FakePCA9685
 
 DEFAULT = Path(__file__).parents[1] / "configs" / "default.toml"
 
 
-def make_system(config=None, pca=None) -> tuple[MotorSystem, FakePCA9685]:
+def default_config() -> Config:
+    return load_config(DEFAULT)
+
+
+def counter_rotated_config() -> Config:
+    config = load_config(DEFAULT)
+    motors = tuple(
+        replace(motor, invert=True, max_duty=0.4)
+        if motor.name == "vertical_secondary"
+        else motor
+        for motor in config.motors
+    )
+    return replace(config, motors=motors)
+
+
+def five_motor_config() -> Config:
+    config = load_config(DEFAULT)
+    fifth = MotorConfig(name="fifth", rpwm=8, lpwm=9, control="L_X")
+    return replace(config, motors=(*config.motors, fifth))
+
+
+def make_system(
+    config: Config | None = None, pca: FakePCA9685 | None = None
+) -> tuple[MotorSystem, FakePCA9685]:
     config = config or load_config(DEFAULT)
     pca = pca or FakePCA9685()
     return MotorSystem(config, pca=pca), pca
+
+
+APPLY_CASES = [
+    pytest.param(
+        default_config,
+        (),
+        {
+            "left": 1.0,
+            "right": -1.0,
+            "vertical_primary": 0.5,
+            "vertical_secondary": -0.5,
+        },
+        {0: 0.0, 1: 0.25, 2: 0.5, 3: 0.0, 4: 0.0, 5: 0.5, 6: 0.0, 7: 0.25},
+        id="standard",
+    ),
+    pytest.param(
+        default_config,
+        (
+            {
+                "left": 1.0,
+                "right": -1.0,
+                "vertical_primary": 1.0,
+                "vertical_secondary": 1.0,
+            },
+        ),
+        {"left": 0.5},
+        {0: 0.0, 1: 0.0, 2: 0.25, 3: 0.0, 4: 0.0, 5: 0.0, 6: 0.0, 7: 0.0},
+        id="omitted-defaults-to-zero",
+    ),
+    pytest.param(
+        counter_rotated_config,
+        (),
+        {"vertical_primary": 0.5, "vertical_secondary": 0.5},
+        {0: 0.0, 1: 0.25, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0, 6: 0.0, 7: 0.2},
+        id="counter-rotated-verticals",
+    ),
+    pytest.param(
+        five_motor_config,
+        (),
+        {
+            "left": 1.0,
+            "right": -1.0,
+            "vertical_primary": 0.5,
+            "vertical_secondary": 0.5,
+            "fifth": -0.5,
+        },
+        {
+            0: 0.0,
+            1: 0.25,
+            2: 0.5,
+            3: 0.0,
+            4: 0.0,
+            5: 0.5,
+            6: 0.25,
+            7: 0.0,
+            8: 0.0,
+            9: 0.25,
+        },
+        id="five-motors",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("config_factory", "before", "setpoints", "expected"), APPLY_CASES
+)
+def test_apply_drives_expected_channels(
+    config_factory: Callable[[], Config],
+    before: tuple[dict[str, float], ...],
+    setpoints: dict[str, float],
+    expected: dict[int, float],
+) -> None:
+    config = config_factory()
+    system, pca = make_system(config)
+
+    for prior in before:
+        system.apply(prior)
+
+    system.apply(setpoints)
+
+    assert system.motor_names == tuple(motor.name for motor in config.motors)
+    assert {channel: pca.duties[channel] for channel in expected} == expected
+    assert all(
+        duty == 0.0 for channel, duty in pca.duties.items() if channel not in expected
+    )
 
 
 def test_startup_zeroes_every_motor() -> None:
@@ -23,84 +134,37 @@ def test_startup_zeroes_every_motor() -> None:
 
     assert pca.all_off_calls == 1
     assert all(duty == 0.0 for duty in pca.duties.values())
-    assert system.motor_names == ("left", "right", "vertical")
+    assert system.motor_names == ("left", "right", "vertical_primary", "vertical_secondary")
 
 
-def test_apply_drives_all_configured_motors() -> None:
-    system, pca = make_system()
-
-    system.apply({"left": 1.0, "right": -1.0, "vertical": 0.5})
-
-    assert pca.duties[2] == 0.5  # left R_PWM
-    assert pca.duties[4] == 0.0  # left L_PWM
-    assert pca.duties[0] == 0.0  # right R_PWM
-    assert pca.duties[5] == 0.5  # right L_PWM
-    assert pca.duties[1] == 0.25  # vertical R_PWM
-    assert pca.duties[3] == 0.0  # vertical L_PWM
+FAULT_CASES = [
+    pytest.param("stop_all", 1, False, 0, id="stop-all"),
+    pytest.param("cleanup", 2, True, 1, id="cleanup-idempotent"),
+]
 
 
-def test_apply_defaults_omitted_motors_to_zero() -> None:
-    system, pca = make_system()
-    system.apply({"left": 1.0, "right": -1.0, "vertical": 1.0})
-
-    system.apply({"left": 0.5})
-
-    assert pca.duties[2] == 0.25
-    assert pca.duties[4] == 0.0
-    assert pca.duties[0] == 0.0
-    assert pca.duties[5] == 0.0
-    assert pca.duties[1] == 0.0
-    assert pca.duties[3] == 0.0
-
-
-def test_four_motor_config_drives_fourth_motor() -> None:
-    config = load_config(DEFAULT)
-    fourth = MotorConfig(name="fourth", rpwm=6, lpwm=7, control="L_X")
-    config = replace(config, motors=(*config.motors, fourth))
-    system, pca = make_system(config)
-
+@pytest.mark.parametrize(("action", "calls", "closed", "close_calls"), FAULT_CASES)
+def test_fault_isolation_continues_stopping_and_cleans_up(
+    action: str, calls: int, closed: bool, close_calls: int
+) -> None:
+    pca = FakePCA9685()
+    system, _ = make_system(pca=pca)
     system.apply(
-        {"left": 1.0, "right": -1.0, "vertical": 0.5, "fourth": -0.5}
+        {
+            "left": 1.0,
+            "right": -1.0,
+            "vertical_primary": 1.0,
+            "vertical_secondary": 1.0,
+        }
     )
 
-    assert system.motor_names[-1] == "fourth"
-    assert pca.duties[6] == 0.0
-    assert pca.duties[7] == 0.25
-
-
-def test_stop_all_continues_after_pca_and_motor_errors() -> None:
-    pca = FakePCA9685()
-    system, _ = make_system(pca=pca)
-    system.apply({"left": 1.0, "right": -1.0, "vertical": 1.0})
-
     pca.fail_all_off = True
     pca.fail_channels = {2}
 
-    system.stop_all()
+    for _ in range(calls):
+        getattr(system, action)()
 
-    # The injected failure left the left R_PWM channel untouched...
     assert pca.duties[2] == 0.5
-    # ...but every other motor was still stopped.
-    assert pca.duties[0] == 0.0
-    assert pca.duties[5] == 0.0
-    assert pca.duties[1] == 0.0
-    assert pca.duties[3] == 0.0
-
-
-def test_cleanup_is_idempotent_and_closes_pca_after_errors() -> None:
-    pca = FakePCA9685()
-    system, _ = make_system(pca=pca)
-    system.apply({"left": 1.0, "right": -1.0, "vertical": 1.0})
-
-    pca.fail_all_off = True
-    pca.fail_channels = {2}
-
-    system.cleanup()
-    system.cleanup()
-
-    assert pca.closed is True
-    assert pca.close_calls == 1
-    assert pca.duties[0] == 0.0
-    assert pca.duties[5] == 0.0
-    assert pca.duties[1] == 0.0
-    assert pca.duties[3] == 0.0
+    assert all(duty == 0.0 for channel, duty in pca.duties.items() if channel != 2)
+    assert pca.closed is closed
+    assert pca.close_calls == close_calls
