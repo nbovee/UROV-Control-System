@@ -1,7 +1,28 @@
 [project]
 name = "urov-control-system"
 version = "0.1.0"
-description = "Add your description here"
+description = "Gamepad teleoperation and thruster control for a Raspberry Pi ROV"
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = []
+requires-python = ">=3.11"
+dependencies = [
+    'evdev>=1.9.3; sys_platform == "linux"',
+    'smbus2>=0.5.0; sys_platform == "linux"',
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["."]

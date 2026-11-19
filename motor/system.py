@@ -1,69 +1,77 @@
-import RPi.GPIO as GPIO
-import busio
-from board import SCL, SDA
-from adafruit_pca9685 import PCA9685
-from motor.motor import Motor, Motor_IBT2
+"""Hardware actuation layer for the IBT-2 thruster set."""
+
+from __future__ import annotations
+
+import logging
+
+from motor.motor import IBT2Motor
+from motor.pca9685 import PCA9685
+
+logger = logging.getLogger(__name__)
 
 
 class MotorSystem:
-    def __init__(self):
-        GPIO.setmode(GPIO.BCM)
+    """Own the PCA9685 and apply named throttle setpoints to IBT-2 motors."""
 
-        i2c_bus = busio.I2C(SCL, SDA)
-        pca = PCA9685(i2c_bus)
-        pca.frequency = 60
+    def __init__(self, config, pca=None) -> None:
+        self.config = config
+        self._owns_pca = pca is None
+        if pca is None:
+            pca = PCA9685(config.i2c_bus, config.pca9685_address, config.pwm_frequency)
+        self._pca = pca
+        self._motors: dict[str, IBT2Motor] = {}
 
-        self.l_motor = Motor(GPIO, pca, 18, 17, 2, 2**15, 0)
-        self.r_motor = Motor(GPIO, pca, 23, 24, 0, 2**15, 0)
-        self.v_motor = Motor_IBT2(GPIO, pca, 5, 6, 1, 3, 2**8, -1 * 2**8)
+        try:
+            for entry in config.motors:
+                self._motors[entry.name] = IBT2Motor(
+                    pca,
+                    entry.rpwm,
+                    entry.lpwm,
+                    entry.max_duty,
+                    entry.invert,
+                )
+            self.stop_all()
+        except Exception:
+            if self._owns_pca:
+                try:
+                    pca.close()
+                except Exception:
+                    logger.exception("failed to close PCA9685 after setup error")
+            raise
 
-        self._gpio = GPIO
-        self._l_trig_last = 0
-        self._r_trig_last = 0
+        self._cleaned = False
 
-        self.handlers = {
-            "L_Y": self._drive_left,
-            "R_Y": self._drive_right,
-            "L_trig": self._drive_vertical,
-            "R_trig": self._drive_vertical,
-            "L_bmp": self._flip_left,
-            "R_bmp": self._flip_right,
-            "Y": self._flip_vertical,
-            "Start": self._reset_flips,
-        }
+    @property
+    def motor_names(self) -> tuple[str, ...]:
+        """Names of the configured motors."""
+        return tuple(self._motors.keys())
 
-    def _drive_left(self, value, label):
-        print(self.l_motor.output(value))
+    def apply(self, setpoints: dict[str, float]) -> None:
+        """Apply throttle setpoints; motors with no entry are stopped."""
+        for name, motor in self._motors.items():
+            motor.output(setpoints.get(name, 0.0))
 
-    def _drive_right(self, value, label):
-        self.r_motor.output(value)
+    def stop_all(self) -> None:
+        """Stop every motor, continuing past individual failures."""
+        try:
+            self._pca.all_off()
+        except Exception:
+            logger.exception("failed to turn off all PCA9685 channels")
+        for motor in self._motors.values():
+            try:
+                motor.stop()
+            except Exception:
+                logger.exception("failed to stop motor")
 
-    def _drive_vertical(self, value, label):
-        if label == "L_trig":
-            self._l_trig_last = value
-            pulse = self.v_motor.output(value - self._r_trig_last)
-        else:
-            self._r_trig_last = value
-            pulse = self.v_motor.output(self._l_trig_last - value)
-        return pulse
-
-    def _flip_left(self, value, label):
-        if value == 1:
-            self.l_motor.flip_stick()
-
-    def _flip_right(self, value, label):
-        if value == 1:
-            self.r_motor.flip_stick()
-
-    def _flip_vertical(self, value, label):
-        if value == 1:
-            self.v_motor.flip_stick()
-
-    def _reset_flips(self, value, label):
-        if value == 1:
-            self.l_motor.reset_flip()
-            self.r_motor.reset_flip()
-            self.v_motor.reset_flip()
-
-    def cleanup(self):
-        self._gpio.cleanup()
+    def cleanup(self) -> None:
+        """Stop all outputs and release the PCA9685 once."""
+        if self._cleaned:
+            return
+        self._cleaned = True
+        self.stop_all()
+        try:
+            close = getattr(self._pca, "close", None)
+            if callable(close):
+                close()
+        except Exception:
+            logger.exception("failed to close PCA9685")

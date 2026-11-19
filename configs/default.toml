@@ -1,0 +1,82 @@
+[controller]
+device_names = ["Logitech Gamepad F310", "Logitech Gamepad F710"]
+deadzone = 0.02
+reconnect_interval_s = 0.5
+
+[controller.axes]
+1 = "L_Y"
+2 = "L_trig"
+4 = "R_Y"
+5 = "R_trig"
+# 0 = "L_X"  # optional fourth-motor control
+
+[controller.buttons]
+304 = "A"       # Arm (requires neutral controls)
+305 = "B"       # Disarm / E-Stop
+308 = "Y"       # Flip vertical
+310 = "L_bmp"   # Flip left
+311 = "R_bmp"   # Flip right
+314 = "Back"    # Reset flips
+
+[controller.actions]
+arm = "A"
+disarm = "B"
+reset_flips = "Back"
+
+[controller.trigger_mux]
+vertical = ["L_trig", "R_trig"]
+
+[vehicle]
+i2c_bus = 1
+pca9685_address = 0x40
+pwm_frequency = 1000
+control_rate_hz = 50.0
+# 0.0 disables the inactivity watchdog for a local change-only evdev loop.
+# Set e.g. 0.5 when controller state arrives over a PoE heartbeat link.
+watchdog_timeout_s = 0.0
+
+# All motors use IBT-2 (BTS7960) drivers. R_EN and L_EN are tied HIGH on the
+# carrier PCB, so software must zero all PCA9685 channels on boot, disarm,
+# disconnect, and shutdown to stop the outputs. Verify every channel assignment
+# against the carrier PCB pinout before powering the thrusters.
+
+[[motor]]
+name = "left"
+rpwm = 2
+lpwm = 4
+max_duty = 0.5
+control = "L_Y"
+flip = "L_bmp"
+deadzone = true
+invert = false
+
+[[motor]]
+name = "right"
+rpwm = 0
+lpwm = 5
+max_duty = 0.5
+control = "R_Y"
+flip = "R_bmp"
+deadzone = true
+invert = false
+
+[[motor]]
+name = "vertical"
+rpwm = 1
+lpwm = 3
+max_duty = 0.5
+control = "vertical"
+flip = "Y"
+deadzone = false
+invert = false
+
+# Fourth motor example: enable the L_X axis above, wire PCA9685 channels 6 and 7
+# to another IBT-2, and uncomment this block.
+# [[motor]]
+# name = "fourth"
+# rpwm = 6
+# lpwm = 7
+# max_duty = 0.5
+# control = "L_X"
+# deadzone = true
+# invert = false
